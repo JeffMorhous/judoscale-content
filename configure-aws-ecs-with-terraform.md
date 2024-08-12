@@ -7,7 +7,7 @@ To complete this tutorial, you'll need to have a few things installed, most nota
 - [NPM](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
 - [Terraform](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli)
 - [Docker](https://docs.docker.com/desktop/install/windows-install/)
-\
+
 First, we'll dig a little deeper into why the software industry loves Infrastructure as Code, and how Terraform plays in. Then, we'll write a quick example app that you can use if you aren't trying to deploy an existing project. Finally, we'll set up our infrastructure one piece at a time with Terraform. As we wrap up, we'll explore a bit about autoscaling and compare your options!
 
 ## Understanding Infrastructure as Code and Terraform
@@ -53,7 +53,7 @@ Finally, paste [the sample code for a Hello World application](https://expressjs
 ```js
 const express = require('express')
 const app = express()
-const port = 8000
+const port = 3000
 
 app.get('/', (req, res) => {
   res.send('Hello World!')
@@ -71,7 +71,7 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-EXPOSE 8000
+EXPOSE 3000
 
 COPY package*.json ./
 RUN npm ci
@@ -105,7 +105,7 @@ docker build --tag example-app .
 Then run the container with:
 
 ```bash
-docker run --publish 8000:8000 example-app
+docker run --publish 3000:3000 example-app
 ```
 
 You should see "Hello world!" when you visit `localhost:3000` in your browser now!
@@ -232,7 +232,7 @@ module "alb" {
 
  target_groups = [
   {
-   backend_port         = 8000
+   backend_port         = 3000
    backend_protocol     = "HTTP"
    target_type          = "ip"
   }
@@ -375,7 +375,7 @@ resource "aws_ecs_task_definition" "this" {
     essential = true,
     image = resource.docker_registry_image.exampleimage.name,
     name = "example-container",
-    portMappings = [{ containerPort = 8000, hostPort = 8000 }],
+    portMappings = [{ containerPort = 3000, hostPort = 3000 }],
   }])
   cpu = 256
   execution_role_arn = "${aws_iam_role.ecsTaskExecutionRole.arn}"
@@ -416,7 +416,7 @@ resource "aws_ecs_service" "this" {
 
   load_balancer {
     container_name = "example-container"
-    container_port = 8000
+    container_port = 3000
     target_group_arn = module.alb.target_group_arns[0]
   }
 
@@ -431,19 +431,74 @@ output "public-url" { value = "http://${module.alb.lb_dns_name}" }
 
 Run `terraform apply` again. Once completed, this will output the public-facing URL for your application! Give it some time to finish the deploy, then visit the URL in your browser to see "Hello World!" from inside AWS!
 
-### Setting up an Nginix Sidecar
+### Setting up an NGINX Sidecar
 
-TODO:
+You may wish to use an NGINX sidecar with your application for a number of reasons, such as using [an autoscaler like Judoscale](https://judoscale.com/docs/aws-getting-started). To do this with Terraform, we'll make a quick change to our Task Definition to also deploy [Judoscale's sidecar container](https://gallery.ecr.aws/b1e6w9f4/nginx-sidecar-start-header) from the public container registry. Replace the existing task definition with this:
 
+```terraform
+resource "aws_ecs_task_definition" "this" {
+  container_definitions = jsonencode([
+    {
+      essential = true,
+      image = resource.docker_registry_image.exampleimage.name,
+      name = "example-container",
+      portMappings = [{ containerPort = 3000, hostPort = 3000 }],
+    },
+    {
+      essential = true,
+      image = "public.ecr.aws/b1e6w9f4/nginx-sidecar-start-header:latest",
+      name = "nginx-sidecar",
+      portMappings = [{ containerPort = 80, hostPort = 80 }],
+    }
+  ])
+  cpu = 256
+  execution_role_arn = "${aws_iam_role.ecsTaskExecutionRole.arn}"
+  family = "family-of-judoscale-example-tasks"
+  memory = 512
+  network_mode = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
 
-## Configuring Fargate Autoscaling with Terraform
-TODO:
+  # Only set the below if building on an ARM64 computer like an Apple Silicon Mac
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+}
+```
 
+Next, we'll change our load balancer to distribute traffic to this NGINX container instead of the web container. The NGINX container will add the needed header, then send the traffic to the container running our app. In the `alb` module, change the `target_groups` to be this:
+
+```terraform
+ target_groups = [
+  {
+   backend_port         = 80
+   backend_protocol     = "HTTP"
+   target_type          = "ip"
+  }
+ ]
+```
+
+Then, apply the changes with `terraform apply`. After waiting some time for the deploy, click the link that Terraform outputs and you'll still see "Hello world!". This shows off some of the convenience of Terraform - we were able to make a pretty complex infrastructure way in just a few lines of code!
+
+You can go into the AWS console yourself to see cluster, the service, the task, and both containers running!
+
+![The AWS Console Showing Our ECS Service](./media/running-sidecar.png)
+
+If you're having any problems at all, compare your code to the [example project's completed Terraform configuration](https://github.com/JeffMorhous/aws-ecs-with-terraform/blob/main/main.tf).
+
+If you were following along with tutorial just to learn, then you probably want to delete the AWS resources you created along the way to avoid charges. Deleting resources with Terraform is just as easy as making any other change. Just run
+
+```bash
+terraform destroy
+```
 
 ## Autoscaling ECS with Queue Time
-TODO:
-- What queue time is
-- Why you may want to autoscale based on queue time
-- How Judoscale can help, link to https://judoscale.com/blog/request-queue-time
-- Deleting everything with `terraform destroy`
-- Link to sample project
+
+AWS's built-in ECS autoscaler, which manages the number of tasks running in your service, works by monitoring CPU utilization and memory usage of your tasks. When these metrics exceed certain thresholds, it automatically adds more tasks to handle the increased load.
+
+While CPU and memory metrics are useful, they show a limited view into an application's performance. For web apps, [one metric that often gets overlooked is queue time](https://judoscale.com/blog/request-queue-time), the duration between when a request hits your server and when your application starts processing it. **High queue times often indicate that your application is struggling to keep up with incoming requests, even if CPU and memory usage seem normal.**
+
+Autoscaling based on queue time can provide more responsive scaling when compared to using memory and CPU. Judoscale offers the ability to [scale ECS applications based on queue time](https://judoscale.com/aws). By monitoring your application's queue time, Judoscale can scale more precisely, helping you maintain performance without overspending on resources optimizing resource usage.
+
+Regardless of your autoscaling choice, Terraform is a powerful option for managing your cloud resources. While this article went over the configuration one piece at a time, you may want to reference the [final example project on GitHub](https://github.com/JeffMorhous/aws-ecs-with-terraform).
+
