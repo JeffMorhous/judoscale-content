@@ -1,14 +1,14 @@
 # Mastering AWS ECS Configuration with Terraform
 
-TODO: Intro
-- Tell the reader what they'll learn
-- Tell the reader what we won't cover (maybe)
+Managing infrastructure for web applications is a complex endeavor, and using Amazon Web Services is no exception. Using an Infrastructure as Code tool like Terraform to provision and change resources for AWS makes the process more straight forward and repeatable. In this article, you'll learn how to create an ECS cluster with Terraform that runs a simple Node app in a Docker container.
 
 To complete this tutorial, you'll need to have a few things installed, most notably:
 
-- NPM
+- [NPM](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
 - [Terraform](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli)
-- Docker
+- [Docker](https://docs.docker.com/desktop/install/windows-install/)
+\
+First, we'll dig a little deeper into why the software industry loves Infrastructure as Code, and how Terraform plays in. Then, we'll write a quick example app that you can use if you aren't trying to deploy an existing project. Finally, we'll set up our infrastructure one piece at a time with Terraform. As we wrap up, we'll explore a bit about autoscaling and compare your options!
 
 ## Understanding Infrastructure as Code and Terraform
 
@@ -53,7 +53,7 @@ Finally, paste [the sample code for a Hello World application](https://expressjs
 ```js
 const express = require('express')
 const app = express()
-const port = 3000
+const port = 8000
 
 app.get('/', (req, res) => {
   res.send('Hello World!')
@@ -71,12 +71,7 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-ENV \
-MY_INPUT_ENV_VAR=dockerfile-default-env-var \
-NODE_ENV=production \
-PORT=8080
-
-EXPOSE ${PORT}
+EXPOSE 8000
 
 COPY package*.json ./
 RUN npm ci
@@ -110,7 +105,7 @@ docker build --tag example-app .
 Then run the container with:
 
 ```bash
-docker run --publish 3000:3000 example-app
+docker run --publish 8000:8000 example-app
 ```
 
 You should see "Hello world!" when you visit `localhost:3000` in your browser now!
@@ -122,13 +117,12 @@ You should see "Hello world!" when you visit `localhost:3000` in your browser no
 Let's get started creating resources on AWS with Terraform! To begin, make a new file in the root of your repository, `main.tf`, with the following starting code:
 
 ```tf
-# Terraform version and providers
 terraform {
   required_version = ">= 1.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.62"
+      version = "~> 4.56"
     }
   }
 }
@@ -139,7 +133,7 @@ provider "aws" {
 }
 ```
 
-This beginning of the Terraform configuration sets up the AWS Terraform provider, which Terraform will use to turn the code into real AWS resources.
+This beginning of the Terraform configuration just sets up the AWS Terraform provider, which Terraform will use to turn the code into real AWS resources. We also set the AWS region, which you can customize to match your needs.
 
 ### Authenticating Terraform to AWS
 
@@ -165,14 +159,16 @@ Without these values, the AWS Terraform provider will not be able to authenticat
 The first real piece of infrastructure we'll add (just below the existing Terraform setup) is a Virtual Private Cloud, or VPC. We'll use the [Terraform module for AWS VPC](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), which makes things pretty easy.
 
 ```tf
+data "aws_availability_zones" "available" { state = "available" }
+
 module "vpc" {
   source = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.12.1"
+  version = "~> 3.19.0"
 
-  azs = slice(data.aws_availability_zones.available.names, 0, 2)
+  azs = slice(data.aws_availability_zones.available.names, 0, 2) # Span subnetworks across 2 avalibility zones
   cidr = "10.0.0.0/16"
-  create_igw = true
-  enable_nat_gateway = true
+  create_igw = true # Expose public subnetworks to the Internet
+  enable_nat_gateway = true # Hide private subnetworks behind NAT Gateway
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
   public_subnets = ["10.0.101.0/24", "10.0.102.0/24"]
   single_nat_gateway = true
@@ -236,7 +232,7 @@ module "alb" {
 
  target_groups = [
   {
-   backend_port         = 8080
+   backend_port         = 8000
    backend_protocol     = "HTTP"
    target_type          = "ip"
   }
@@ -253,7 +249,7 @@ We're finally to the core of what we're trying to do! Add the following to the b
 ```terraform
 module "ecs" {
   source  = "terraform-aws-modules/ecs/aws"
-  version = "~> 5.11.4"
+  version = "~> 4.1.3"
 
   cluster_name = "judoscale-example"
 
@@ -287,10 +283,10 @@ The goal of this tutorial is to have the Docker container we built locally in th
 required_providers {
   aws = {
     source  = "hashicorp/aws"
-    version = "~> 5.62"
+    version = "~> 4.56"
   }
   docker = {
-	source  = "kreuzwerker/docker"
+    source  = "kreuzwerker/docker"
     version = "~> 3.0.2"
   }
 }
@@ -299,7 +295,6 @@ required_providers {
 Next, add the following to the bottom of `main.tf` to create an Elastic Container Registry and build and push an image to it when running Terraform:
 
 ```terraform
-
 data "aws_caller_identity" "this" {}
 data "aws_ecr_authorization_token" "this" {}
 data "aws_region" "this" {}
@@ -324,9 +319,9 @@ module "ecr" {
       description = "Delete old images"
       rulePriority = 1
       selection = {
-      countNumber = 3
-      countType = "imageCountMoreThan"
-      tagStatus = "any"
+        countNumber = 3
+        countType = "imageCountMoreThan"
+        tagStatus = "any"
       }
     }]
   })
@@ -349,31 +344,92 @@ Install the new Docker provider with `terraform init` and apply the plan with `t
 ![The AWS ECR on the AWS Dashboard](./media/aws-ecr-dashboard.png)
 
 
-### Creating ECS Task Definitions
+### Creating an ECS Task Definition
 
 An ECS cluster is not very useful on its own. We'll use Terraform to create an [ECS task definition](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definitions.html) that defines our application. Add the following to the bottom of `main.tf`:
 
 ```terraform
-data "aws_iam_role" "ecs_task_execution_role" { name = "ecsTaskExecutionRole" }
+resource "aws_iam_role" "ecsTaskExecutionRole" {
+  name               = "ecsTaskExecutionRole"
+  assume_role_policy = "${data.aws_iam_policy_document.assume_role_policy.json}"
+}
+
+data "aws_iam_policy_document" "assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ecsTaskExecutionRole_policy" {
+  role       = "${aws_iam_role.ecsTaskExecutionRole.name}"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
 resource "aws_ecs_task_definition" "this" {
   container_definitions = jsonencode([{
     essential = true,
     image = resource.docker_registry_image.exampleimage.name,
     name = "example-container",
-    portMappings = [{ containerPort = 8000 }],
+    portMappings = [{ containerPort = 8000, hostPort = 8000 }],
   }])
   cpu = 256
-  execution_role_arn = data.aws_iam_role.ecs_task_execution_role.arn
+  execution_role_arn = "${aws_iam_role.ecsTaskExecutionRole.arn}"
   family = "family-of-judoscale-example-tasks"
   memory = 512
   network_mode = "awsvpc"
   requires_compatibilities = ["FARGATE"]
+
+  # Only set the below if building on an ARM64 computer like an Apple Silicon Mac
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
 }
 ```
 
-TODO: Test after docker
+This creates both the ECS task and IAM role it needs.
 
+You'll notice that there's a `runtime_platform` section in the ECS Task resource - if you're building your Docker container on an ARM64 machine like an Apple Silicon Mac, you'll need this section. If not, you'll need to remove it!
 
+Run `terraform apply` to create this task definition.
+
+### Creating an ECS Service
+
+Next, we'll use Terraform to create an ECS service, which manages the task we just created.
+
+```terraform
+resource "aws_ecs_service" "this" {
+  cluster = module.ecs.cluster_id
+  desired_count = 1
+  launch_type = "FARGATE"
+  name = "judoscale-example-service"
+  task_definition = resource.aws_ecs_task_definition.this.arn
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
+  load_balancer {
+    container_name = "example-container"
+    container_port = 8000
+    target_group_arn = module.alb.target_group_arns[0]
+  }
+
+  network_configuration {
+    security_groups = [module.vpc.default_security_group_id]
+    subnets = module.vpc.private_subnets
+  }
+}
+
+output "public-url" { value = "http://${module.alb.lb_dns_name}" }
+```
+
+Run `terraform apply` again. Once completed, this will output the public-facing URL for your application! Give it some time to finish the deploy, then visit the URL in your browser to see "Hello World!" from inside AWS!
 
 ### Setting up an Nginix Sidecar
 
