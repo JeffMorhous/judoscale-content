@@ -346,7 +346,11 @@ Install the new Docker provider with `terraform init` and apply the plan with `t
 
 ### Creating an ECS Task Definition
 
-An ECS cluster is not very useful on its own. We'll use Terraform to create an [ECS task definition](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definitions.html) that defines our application. Add the following to the bottom of `main.tf`:
+An ECS cluster is not very useful on its own. Within a cluster, you must define services, which manage a specified number of tasks running simultaneously. Each task in the service is an instantiation of a task definition, which specifies one or more containers to run together.
+
+![A Diagram Showing the Relationship Between ECS Clusters, Services and Tasks](./media/ecs-diagram.png)
+
+We'll first use Terraform to create an [ECS task definition](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definitions.html) that defines our application. Add the following to the bottom of `main.tf`:
 
 ```terraform
 resource "aws_iam_role" "ecsTaskExecutionRole" {
@@ -431,9 +435,17 @@ output "public-url" { value = "http://${module.alb.lb_dns_name}" }
 
 Run `terraform apply` again. Once completed, this will output the public-facing URL for your application! Give it some time to finish the deploy, then visit the URL in your browser to see "Hello World!" from inside AWS!
 
+## Autoscaling ECS with Queue Time
+
+AWS's built-in ECS autoscaler, which manages the number of tasks running in your service, works by monitoring CPU utilization and memory usage of your tasks. When these metrics exceed certain thresholds, it automatically adds more tasks to handle the increased load.
+
+While CPU and memory metrics are useful, they show a limited view of an application's performance. For web apps, [one metric that often gets overlooked is queue time](https://judoscale.com/blog/request-queue-time), the duration between when a request hits your server and when your application starts processing it. **High queue times often indicate that your application is struggling to keep up with incoming requests, even if CPU and memory usage seem normal.**
+
+Autoscaling based on queue time can provide more responsive scaling when compared to using memory and CPU. Judoscale offers the ability to [scale ECS applications based on queue time](https://judoscale.com/aws). By monitoring your application's queue time, Judoscale can scale more precisely, helping you maintain performance without overspending on resources.
+
 ### Setting up an NGINX Sidecar
 
-You may wish to use an NGINX sidecar with your application for several reasons, such as using [an autoscaler like Judoscale](https://judoscale.com/docs/aws-getting-started). To do this with Terraform, we'll make a quick change to our Task Definition to also deploy [Judoscale's sidecar container](https://gallery.ecr.aws/b1e6w9f4/nginx-sidecar-start-header) from the public container registry. Replace the existing task definition with this:
+If you're using [an autoscaler like Judoscale](https://judoscale.com/docs/aws-getting-started), you'll need to run an NGINX sidecar proxy to inject the `X-Request-Start` header into web requests. Because all of our infrastructure was created with Terraform, we can make this change to the setup pretty easily. We'll make a quick change to our Task Definition to also deploy [Judoscale's sidecar container](https://gallery.ecr.aws/b1e6w9f4/nginx-sidecar-start-header) from the public container registry. Replace the existing task definition with this:
 
 ```terraform
 resource "aws_ecs_task_definition" "this" {
@@ -486,19 +498,14 @@ You can go into the AWS console yourself to see the cluster, the service, the ta
 
 If you're having any problems at all, compare your code to the [example project's completed Terraform configuration](https://github.com/JeffMorhous/aws-ecs-with-terraform/blob/main/main.tf).
 
+## Cleaning Up Our Resources
+
 If you were following along with the tutorial just to learn, then you probably want to delete the AWS resources you created along the way to avoid charges. Deleting resources with Terraform is just as easy as making any other change. Just run
 
 ```bash
 terraform destroy
 ```
 
-## Autoscaling ECS with Queue Time
-
-AWS's built-in ECS autoscaler, which manages the number of tasks running in your service, works by monitoring CPU utilization and memory usage of your tasks. When these metrics exceed certain thresholds, it automatically adds more tasks to handle the increased load.
-
-While CPU and memory metrics are useful, they show a limited view of an application's performance. For web apps, [one metric that often gets overlooked is queue time](https://judoscale.com/blog/request-queue-time), the duration between when a request hits your server and when your application starts processing it. **High queue times often indicate that your application is struggling to keep up with incoming requests, even if CPU and memory usage seem normal.**
-
-Autoscaling based on queue time can provide more responsive scaling when compared to using memory and CPU. Judoscale offers the ability to [scale ECS applications based on queue time](https://judoscale.com/aws). By monitoring your application's queue time, Judoscale can scale more precisely, helping you maintain performance without overspending on resources.
 
 Regardless of your autoscaling choice, Terraform is a powerful option for managing your cloud resources. While this article went over the configuration one piece at a time, you may want to reference the [final example project on GitHub](https://github.com/JeffMorhous/aws-ecs-with-terraform).
 
