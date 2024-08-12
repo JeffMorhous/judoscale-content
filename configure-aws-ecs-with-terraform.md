@@ -1,6 +1,6 @@
 # Mastering AWS ECS Configuration with Terraform
 
-Managing infrastructure for web applications is a complex endeavor, and using Amazon Web Services is no exception. Using an Infrastructure as Code tool like Terraform to provision and change resources for AWS makes the process more straight forward and repeatable. In this article, you'll learn how to create an ECS cluster with Terraform that runs a simple Node app in a Docker container.
+Managing infrastructure for web applications is a complex endeavor, and using Amazon Web Services is no exception. Using an Infrastructure as Code tool like Terraform to provision and change resources for AWS makes the process more straightforward and repeatable. In this article, you'll learn how to create an ECS cluster with Terraform that runs a simple Node app in a Docker container.
 
 To complete this tutorial, you'll need to have a few things installed, most notably:
 
@@ -8,11 +8,11 @@ To complete this tutorial, you'll need to have a few things installed, most nota
 - [Terraform](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli)
 - [Docker](https://docs.docker.com/desktop/install/windows-install/)
 
-First, we'll dig a little deeper into why the software industry loves Infrastructure as Code, and how Terraform plays in. Then, we'll write a quick example app that you can use if you aren't trying to deploy an existing project. Finally, we'll set up our infrastructure one piece at a time with Terraform. As we wrap up, we'll explore a bit about autoscaling and compare your options!
+First, we'll dig deeper into why the software industry loves Infrastructure as Code, and how Terraform plays in. Then, we'll write a quick example app that you can use if you aren't trying to deploy an existing project. Finally, we'll set up our infrastructure one piece at a time with Terraform. As we wrap up, we'll explore autoscaling and compare your options!
 
 ## Understanding Infrastructure as Code and Terraform
 
-Whether your team is using a platform, a cloud provider, or even on-site hardware, configuring infrastructure is an unavoidable part of building software. Historically, developers and ops professionals have used user-interfaces to configure infrastructure. You can set up and make changes to AWS services using the AWS Management Console, but Infrastructure as Code (IaC) offers a better way.
+Whether your team is using a platform, a cloud provider, or even on-site hardware, configuring infrastructure is an unavoidable part of building software. Historically, developers and ops professionals have used user interfaces to configure infrastructure. You can set up and make changes to AWS services using the AWS Management Console, but Infrastructure as Code (IaC) offers a better way.
 
 [Infrastructure as Code](https://aws.amazon.com/what-is/iac/#:~:text=Infrastructure%20as%20code%20(IaC)%20is,%2C%20database%20connections%2C%20and%20storage.) refers to the practice of provisioning and managing infrastructure as text files, compared to using a UI. AWS offers Cloud Formation, its own product to manage AWS infrastructure with JSON and YAML files. While popular, a vendor-specific offering like this introduces some vendor lock-in, so some teams may wish to use a platform-independent IaC tool like Terraform.
 
@@ -137,9 +137,9 @@ This beginning of the Terraform configuration just sets up the AWS Terraform pro
 
 ### Authenticating Terraform to AWS
 
-Terraform will need to access AWS, so you'll need to create a new IAM user in the AWS console. Give it a memorable name, like `terraform-user`, then move on to set permissions. You'll need to attach policies directly. For a real project, you should follow the principle of least privledged access and only grant this IAM user the minimum access it needs. For simplicity in this tutorial, you can give it full rights with the `AdministratorAccess` policy. Create an access key for this user for CLI access. Finally, note the access key and secrete.
+Terraform will need to access AWS, so you'll need to create a new IAM user in the AWS console. Give it a memorable name, like `terraform-user`, then move on to set permissions. You'll need to attach policies directly. For a real project, you should follow the principle of least privileged access and only grant this IAM user the minimum access it needs. For simplicity in this tutorial, you can give it full rights with the `AdministratorAccess` policy. Create an access key for this user for CLI access. Finally, note the access key and secrete.
 
-You can only view the secret once, so AWS gives you an option to download a CSV file with the key and secret.
+You can only view the secret once, so AWS gives you the option to download a CSV file with the key and secret.
 
 ![Creating an IAM Access Key](./media/iam-access-key.png)
 
@@ -156,7 +156,7 @@ Without these values, the AWS Terraform provider will not be able to authenticat
 
 ### Creating a VPC
 
-The first real piece of infrastructure we'll add (just below the existing Terraform setup) is a Virtual Private Cloud, or VPC. We'll use the [Terraform module for AWS VPC](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), which makes things pretty easy.
+The first real piece of infrastructure we'll add (just below the existing Terraform setup) is a Virtual Private Cloud or VPC. We'll use the [Terraform module for AWS VPC](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), which makes things pretty easy.
 
 ```tf
 data "aws_availability_zones" "available" { state = "available" }
@@ -269,7 +269,7 @@ module "ecs" {
 }
 ```
 
-You don't _have to_ run apply Terraform after every change, but it's an nice way to sanity check that each addition is doing what you intend. Run `terraform init` and `terraform apply` again.
+You don't _have to_ apply Terraform after every change, but it's an nice way to sanity check that each addition is doing what you intend. Run `terraform init` and `terraform apply` again.
 
 Terraform gives you a confirmation of the success, but you're probably wondering if things are actually happening in AWS. At this point, it's easy to check! Go to the AWS dashboard for the region you selected in your Terraform code (in the example we use us-west-2), then go to Elastic Container Service and see your newly created cluster!
 
@@ -277,7 +277,7 @@ Terraform gives you a confirmation of the success, but you're probably wondering
 
 ### Get the Docker container into AWS
 
-The goal of this tutorial is to have the Docker container we built locally in the beginning running on AWS, so we have to set up terraform to make that happen. First, we'll need to install the Docker Terraform provider. Edit the `required_providers` block at the beginning of your `main.tf` to include the Docker provider in addition to the existing AWS provider:
+The goal of this tutorial is to have the Docker container we built locally in the beginning running on AWS, so we have to set up Terraform to make that happen. First, we'll need to install the Docker Terraform provider. Edit the `required_providers` block at the beginning of your `main.tf` to include the Docker provider in addition to the existing AWS provider:
 
 ```terraform
 required_providers {
@@ -394,7 +394,7 @@ resource "aws_ecs_task_definition" "this" {
 
 This creates both the ECS task and IAM role it needs.
 
-You'll notice that there's a `runtime_platform` section in the ECS Task resource - if you're building your Docker container on an ARM64 machine like an Apple Silicon Mac, you'll need this section. If not, you'll need to remove it!
+You'll notice there is a `runtime_platform` section in the ECS Task resource - if you're building your Docker container on an ARM64 machine like an Apple Silicon Mac, you'll need this section. If not, you'll need to remove it!
 
 Run `terraform apply` to create this task definition.
 
@@ -433,7 +433,7 @@ Run `terraform apply` again. Once completed, this will output the public-facing 
 
 ### Setting up an NGINX Sidecar
 
-You may wish to use an NGINX sidecar with your application for a number of reasons, such as using [an autoscaler like Judoscale](https://judoscale.com/docs/aws-getting-started). To do this with Terraform, we'll make a quick change to our Task Definition to also deploy [Judoscale's sidecar container](https://gallery.ecr.aws/b1e6w9f4/nginx-sidecar-start-header) from the public container registry. Replace the existing task definition with this:
+You may wish to use an NGINX sidecar with your application for several reasons, such as using [an autoscaler like Judoscale](https://judoscale.com/docs/aws-getting-started). To do this with Terraform, we'll make a quick change to our Task Definition to also deploy [Judoscale's sidecar container](https://gallery.ecr.aws/b1e6w9f4/nginx-sidecar-start-header) from the public container registry. Replace the existing task definition with this:
 
 ```terraform
 resource "aws_ecs_task_definition" "this" {
@@ -466,7 +466,7 @@ resource "aws_ecs_task_definition" "this" {
 }
 ```
 
-Next, we'll change our load balancer to distribute traffic to this NGINX container instead of the web container. The NGINX container will add the needed header, then send the traffic to the container running our app. In the `alb` module, change the `target_groups` to be this:
+Next, we'll change our load balancer to distribute traffic to this NGINX container instead of the web container. The NGINX container will add the needed header, and then send the traffic to the container running our app. In the `alb` module, change the `target_groups` to be this:
 
 ```terraform
  target_groups = [
@@ -480,13 +480,13 @@ Next, we'll change our load balancer to distribute traffic to this NGINX contain
 
 Then, apply the changes with `terraform apply`. After waiting some time for the deploy, click the link that Terraform outputs and you'll still see "Hello world!". This shows off some of the convenience of Terraform - we were able to make a pretty complex infrastructure way in just a few lines of code!
 
-You can go into the AWS console yourself to see cluster, the service, the task, and both containers running!
+You can go into the AWS console yourself to see the cluster, the service, the task, and both containers running!
 
 ![The AWS Console Showing Our ECS Service](./media/running-sidecar.png)
 
 If you're having any problems at all, compare your code to the [example project's completed Terraform configuration](https://github.com/JeffMorhous/aws-ecs-with-terraform/blob/main/main.tf).
 
-If you were following along with tutorial just to learn, then you probably want to delete the AWS resources you created along the way to avoid charges. Deleting resources with Terraform is just as easy as making any other change. Just run
+If you were following along with the tutorial just to learn, then you probably want to delete the AWS resources you created along the way to avoid charges. Deleting resources with Terraform is just as easy as making any other change. Just run
 
 ```bash
 terraform destroy
@@ -496,9 +496,9 @@ terraform destroy
 
 AWS's built-in ECS autoscaler, which manages the number of tasks running in your service, works by monitoring CPU utilization and memory usage of your tasks. When these metrics exceed certain thresholds, it automatically adds more tasks to handle the increased load.
 
-While CPU and memory metrics are useful, they show a limited view into an application's performance. For web apps, [one metric that often gets overlooked is queue time](https://judoscale.com/blog/request-queue-time), the duration between when a request hits your server and when your application starts processing it. **High queue times often indicate that your application is struggling to keep up with incoming requests, even if CPU and memory usage seem normal.**
+While CPU and memory metrics are useful, they show a limited view of an application's performance. For web apps, [one metric that often gets overlooked is queue time](https://judoscale.com/blog/request-queue-time), the duration between when a request hits your server and when your application starts processing it. **High queue times often indicate that your application is struggling to keep up with incoming requests, even if CPU and memory usage seem normal.**
 
-Autoscaling based on queue time can provide more responsive scaling when compared to using memory and CPU. Judoscale offers the ability to [scale ECS applications based on queue time](https://judoscale.com/aws). By monitoring your application's queue time, Judoscale can scale more precisely, helping you maintain performance without overspending on resources optimizing resource usage.
+Autoscaling based on queue time can provide more responsive scaling when compared to using memory and CPU. Judoscale offers the ability to [scale ECS applications based on queue time](https://judoscale.com/aws). By monitoring your application's queue time, Judoscale can scale more precisely, helping you maintain performance without overspending on resources.
 
 Regardless of your autoscaling choice, Terraform is a powerful option for managing your cloud resources. While this article went over the configuration one piece at a time, you may want to reference the [final example project on GitHub](https://github.com/JeffMorhous/aws-ecs-with-terraform).
 
